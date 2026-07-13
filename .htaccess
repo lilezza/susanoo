@@ -1,0 +1,17 @@
+# Deny direct access to sensitive paths (Apache / cPanel / LiteSpeed)
+Options -Indexes
+
+<IfModule mod_authz_core.c>
+    <FilesMatch "^(config\.php|composer\.(json|lock)|install\.sh|version|text\.json)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    <FilesMatch "^(config\.php|composer\.(json|lock)|install\.sh|version|text\.json)$">
+        Order allow,deny
+        Deny from all
+    </FilesMatch>
+</IfModule>
+
+# Protect internal dirs from browser access
+RedirectMatch 403 (?i)^/(storage|logs|vendor|cronbot)/
