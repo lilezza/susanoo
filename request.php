@@ -23,6 +23,16 @@ class CurlRequest {
     private $authToken = null;
     private $api_key = null;
     private $cookie = null;
+
+    /**
+     * One persistent curl handle reused across every request in the process.
+     * Keeping it open preserves curl's connection pool, so repeated calls to the
+     * same panel host reuse the live TLS connection instead of paying a fresh
+     * DNS + TCP + TLS handshake each time (the common buy/renew flow hits the
+     * same panel several times in a row).
+     */
+    private static $sharedHandle = null;
+
     public function __construct($url) {
         $this->url = $url;
     }
@@ -62,7 +72,13 @@ class CurlRequest {
 
     private function execute($method, $data = null) {
         $this->timeout = !$this->timeout ? 8 : $this->timeout;
-        $ch = curl_init();
+        // Reuse one persistent handle (keeps the connection pool alive between calls).
+        if (self::$sharedHandle === null) {
+            self::$sharedHandle = curl_init();
+        } else {
+            curl_reset(self::$sharedHandle);
+        }
+        $ch = self::$sharedHandle;
         curl_setopt($ch, CURLOPT_URL, $this->url);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -114,14 +130,13 @@ class CurlRequest {
                 $dedupKey,
                 sprintf('CurlRequest error calling %s: %s (HTTP code: %s)', $this->url, $error, var_export($httpCode, true))
             );
-            curl_close($ch);
+            // Keep the shared handle open; a dead pooled connection is re-dialed automatically.
             return [
                 'status' => $httpCode,
                 'body' => $response,
                 'error' => $error,
             ];
         }
-        curl_close($ch);
 
 
         $rxLogAll = defined('BOT_CURL_LOG_ALL_HTTP_ERRORS') && BOT_CURL_LOG_ALL_HTTP_ERRORS === true;
