@@ -270,6 +270,88 @@ function revoke_sub($username_account,$location)
     return $response;
 }
 
+if (!function_exists('rx_panel_is_rebecca')) {
+    /** True for Rebecca panel rows (Marzban fork with the Service-based user model). */
+    function rx_panel_is_rebecca($panel): bool
+    {
+        return is_array($panel) && ($panel['type'] ?? '') === 'rebecca';
+    }
+}
+
+if (!function_exists('rx_rebecca_extract_service_id')) {
+    /** Pull the first numeric service id out of a decoded config value. */
+    function rx_rebecca_extract_service_id($dec): ?int
+    {
+        if (is_int($dec)) {
+            return $dec;
+        }
+        if (is_string($dec) && ctype_digit(trim($dec))) {
+            return (int) trim($dec);
+        }
+        if (is_array($dec)) {
+            if (isset($dec['service_id']) && is_numeric($dec['service_id'])) {
+                return (int) $dec['service_id'];
+            }
+            foreach ($dec as $v) {
+                if (is_numeric($v)) {
+                    return (int) $v;
+                }
+                if (is_string($v) && preg_match('/setservice-(\d+)/', $v, $m)) {
+                    return (int) $m[1];
+                }
+                if (is_array($v)) {
+                    $r = rx_rebecca_extract_service_id($v);
+                    if ($r !== null) {
+                        return $r;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+}
+
+if (!function_exists('rx_rebecca_service_id')) {
+    /**
+     * Resolve the numeric Rebecca service id for a panel row.
+     *
+     * Rebecca (Marzban fork, v0.2.0+) removed manual inbound selection; every user
+     * must be attached to a Service. The admin stores the numeric service id in the
+     * panel's `inbounds` column. A bare number, {"service_id":N}, [N], or a
+     * setservice-N inbound tag are all accepted. Returns null if none is found.
+     */
+    function rx_rebecca_service_id($panel): ?int
+    {
+        if (!is_array($panel)) {
+            return null;
+        }
+        foreach (['rebecca_service_id', 'inbounds', 'guard_service_ids'] as $col) {
+            if (!isset($panel[$col])) {
+                continue;
+            }
+            $raw = $panel[$col];
+            if ($raw === null || $raw === '' || $raw === 'null') {
+                continue;
+            }
+            if (is_int($raw)) {
+                return $raw;
+            }
+            if (is_string($raw) && ctype_digit(trim($raw))) {
+                return (int) trim($raw);
+            }
+            $dec = is_string($raw) ? json_decode($raw, true) : $raw;
+            $sid = rx_rebecca_extract_service_id($dec);
+            if ($sid !== null) {
+                return $sid;
+            }
+            if (is_string($raw) && preg_match('/setservice-(\d+)/', $raw, $m)) {
+                return (int) $m[1];
+            }
+        }
+        return null;
+    }
+}
+
 function adduser($location,$data_limit,$username_ac,$timestamp,$note ='',$data_limit_reset = 'no_reset',$name_product = false)
 {
     global $pdo;
@@ -391,6 +473,16 @@ function adduser($location,$data_limit,$username_ac,$timestamp,$note ='',$data_l
     $req = new CurlRequest($url);
     $req->setHeaders($headers);
     $req->setBearerToken($Check_token['access_token']);
+    // Rebecca (v0.2.0+) rejects manual inbound/proxy selection — swap the classic
+    // payload for the required service_id (its Service-based user model).
+    if (rx_panel_is_rebecca($marzban_list_get)) {
+        $service_id = rx_rebecca_service_id($marzban_list_get);
+        if ($service_id === null) {
+            return ["error" => "Rebecca: this panel has no service configured. Set the numeric service id in the panel's inbounds field."];
+        }
+        unset($data['proxies'], $data['inbounds'], $data['proxy_settings'], $data['group_ids']);
+        $data['service_id'] = $service_id;
+    }
     $response = $req->post(json_encode($data));
     return $response;
 }
@@ -475,6 +567,19 @@ function Modifyuser($location,$username,array $data)
             'accept: application/json',
             'Content-Type: application/json'
     );
+    // Rebecca (v0.2.0+): strip the classic inbound/proxy keys it no longer accepts,
+    // and (re)assert the panel's service_id when the caller meant to set connection.
+    if (rx_panel_is_rebecca($marzban_list_get)) {
+        $wantsService = isset($data['inbounds']) || isset($data['proxies'])
+            || isset($data['group_ids']) || isset($data['proxy_settings']);
+        unset($data['proxies'], $data['inbounds'], $data['proxy_settings'], $data['group_ids']);
+        if ($wantsService && !array_key_exists('service_id', $data)) {
+            $service_id = rx_rebecca_service_id($marzban_list_get);
+            if ($service_id !== null) {
+                $data['service_id'] = $service_id;
+            }
+        }
+    }
     $payload = json_encode($data);
     $req = new CurlRequest($url);
     $req->setHeaders($headers);

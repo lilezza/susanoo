@@ -17,10 +17,10 @@ if (!rx_cron_db_ready('activeconfig')) {
 $ManagePanel = new ManagePanel();
 
 
-$stmt = $pdo->prepare("SELECT id FROM user WHERE checkstatus = '1' ORDER BY RAND() LIMIT 10");
+$stmt = $pdo->prepare("SELECT id FROM user WHERE checkstatus = '1' ORDER BY id LIMIT 10");
 $stmt->execute();
 while ($result = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $stmts = $pdo->prepare("SELECT * FROM invoice WHERE id_user = '{$result['id']}' AND Status = 'disablebyadmin'  ORDER BY RAND() LIMIT 10");
+        $stmts = $pdo->prepare("SELECT * FROM invoice WHERE id_user = '{$result['id']}' AND Status = 'disablebyadmin'  ORDER BY id_invoice LIMIT 10");
         $stmts->execute();
         $selectinvoice = $stmts->fetchAll();
         if($stmts->rowCount() == 0){

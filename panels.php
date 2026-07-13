@@ -452,15 +452,43 @@ class ManagePanel
             $Output['subscription_url'] = $subscriptionUrl;
             $Output['configs'] = $configs;
         } elseif ($Get_Data_Panel['type'] == "Manualsale") {
-            $statement = $pdo->prepare("SELECT * FROM manualsell WHERE codepanel = :code_panel AND status = 'active' AND codeproduct = '$code_product' ORDER BY RAND() LIMIT 1");
-            $statement->execute(array(':code_panel' => $Get_Data_Panel['code_panel']));
+            // Atomically claim the oldest active stock item for this product. The old
+            // "SELECT ... ORDER BY RAND() then UPDATE" both raced (two concurrent
+            // buyers could grab the same code) and interpolated $code_product straight
+            // into SQL. A single UPDATE ... LIMIT 1 claims exactly one row under a row
+            // lock, and every value is bound.
+            $claim = $pdo->prepare(
+                "UPDATE manualsell SET status = 'selled', username = :username
+                   WHERE codepanel = :code_panel AND status = 'active' AND codeproduct = :code_product
+                   ORDER BY id LIMIT 1"
+            );
+            $claim->execute(array(
+                ':username'     => $usernameC,
+                ':code_panel'   => $Get_Data_Panel['code_panel'],
+                ':code_product' => $code_product,
+            ));
+            if ($claim->rowCount() < 1) {
+                return array(
+                    'status' => 'Unsuccessful',
+                    'msg'    => 'موجودی فروش دستی برای این محصول تمام شده است.'
+                );
+            }
+            $statement = $pdo->prepare(
+                "SELECT * FROM manualsell
+                   WHERE codepanel = :code_panel AND codeproduct = :code_product
+                     AND status = 'selled' AND username = :username
+                   ORDER BY id DESC LIMIT 1"
+            );
+            $statement->execute(array(
+                ':code_panel'   => $Get_Data_Panel['code_panel'],
+                ':code_product' => $code_product,
+                ':username'     => $usernameC,
+            ));
             $configman = $statement->fetch(PDO::FETCH_ASSOC);
             $Output['status'] = 'successful';
             $Output['username'] = $usernameC;
             $Output['subscription_url'] = $configman['contentrecord'];
             $Output['configs'] = "";
-            update("manualsell", "status", "selled", "id", $configman['id']);
-            update("manualsell", "username", $usernameC, "id", $configman['id']);
         } elseif ($Get_Data_Panel['type'] == "WGDashboard") {
             $data_limit = round($data_limit / (1024 * 1024 * 1024), 2);
             $data_Output = addpear($Get_Data_Panel['name_panel'], $usernameC);

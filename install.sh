@@ -17,7 +17,7 @@ set -o pipefail
 
 # ─── METADATA ──────────────────────────────────────────────────────────────
 readonly SUSANOO_VERSION="v0.0.2"
-readonly SUSANOO_REPO="Mmd-Amir/Susanoo"
+readonly SUSANOO_REPO="lilezza/susanoo"
 readonly SUSANOO_GITHUB="https://github.com/${SUSANOO_REPO}"
 readonly SUSANOO_TELEGRAM="https://t.me/susanoo"
 
